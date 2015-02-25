@@ -1,0 +1,40 @@
+\documentclass{xesel}
+
+\usepackage{polyglossia}
+\setdefaultlanguage{russian}
+\setotherlanguage{english}
+\defaultfontfeatures{Mapping=tex-text}
+\setmainfont[AutoFakeSlant=0.25,AutoFakeBold=0.2,Scale=0.8]{opengosta.otf}
+
+\usepackage{datatool}
+
+\begin{document}
+	
+	% BOMBIER configuration
+	\XeselDesignedBy{Автор}
+%	\XeselCheckedBy{}
+%	\XeselInspectedBy{}
+%	\XeselApprovedBy{}
+	
+	\XeselDocumentNumber{АБВГ 000000.001 ПЭ3}
+	\XeselDocumentName{Устройство}
+	\XeselOrganisation{ООО <<ЫЫЫ>>}
+	
+	\newcommand{\bomfile}{gost-bom.csv}
+	
+	
+	\DTLloadrawdb[keys={Designator,Description,Count,Note}]{bom}{\bomfile}
+	
+	\begin{xesel}
+		
+		\DTLforeach{bom}{\Des=Designator, \Desc=Description, \Cnt=Count, \Note=Note}{%
+			\ifthenelse{\equal{\Cnt}{}}{%
+				\XeselHeader{\Desc}
+				}{%
+				\XeselEntry{\Des}{\Desc}{\Cnt}{\Note}
+				}
+		}
+		
+	\end{xesel}
+
+\end{document}
