@@ -1,6 +1,30 @@
 #! /usr/bin/env python3
 
+# Bombier GOST script v2.0
+
 import csv
+
+#
+# Configurations
+#
+
+# Input and output filenames
+inBomName  = 'bom.csv'
+outBomName = 'bom-gost.csv'
+
+# Corresponding between BOM and Gost-BOM CSV columns
+gostDesColumn  = 'Designator'
+gostCompColumn = ['Footprint','Manufacturer','ComponentName','Value','Tolerance','ValueII','ValueIII']
+gostNoteColumn = 'Note'
+
+
+#
+# Functions
+#
+
+# Get base of designator (R for R12, C for C2, etc)
+def base(designator):
+        return ''.join([i for i in designator if not i.isdigit()])
 
 # Add comma before string if not empty
 def commatize(string):
@@ -9,8 +33,15 @@ def commatize(string):
         else:
                 return ', ' + string
 
-# Make designator cell for GOST bom
-def des(first, last, count):
+# Make component description column
+def mkdesc(rawEntry, columns):
+        desc = rawEntry[columns[0]]
+        for field in columns[1:]:
+                desc = desc + commatize(rawEntry[field])
+        return desc
+
+# Make designator cell content for GOST bom
+def mkdes(first, last, count):
         if count == 1:
                 return first
         elif count == 2:
@@ -18,105 +49,120 @@ def des(first, last, count):
         else:
                 return first + '...' + last
 
-# Conversion structure
-cBase  = '' # Designator base: 'C', 'R', 'DA', 'VD', ...
-cFirst = '' # First component with same data
-cLast  = '' # Last component with same data
-cDesc  = '' # Component description
-cCount = 0  # Same component counter
-cNote  = '' # Component note
 
-# Comparsion 'current' structure
-curBase  = ''
-curDesc  = ''
-curNote  = ''
+#
+# First conversion pass to temp BOM (without group headers)
+#
 
-# Temporary BOM (no group headers)
+# Define BOM-conversion structure
+class Entry:
+    pass
+
+convBomEntry = Entry()          # Conversion BOM entry (maked from input BOM)
+tempBomEntry = Entry()          # Temp BOM entry
+
+convBomEntry.desBase  = ''      # Designator base (R for R12, C for C2, etc)
+convBomEntry.compDesc = ''      # Component description
+convBomEntry.compNote = ''      # Component note
+
+tempBomEntry.desBase   = ''     # Designator base (R for R12, C for C2, etc)
+tempBomEntry.desFirst  = ''     # First designator in entry
+tempBomEntry.desLast   = ''     # Last designator in entry
+tempBomEntry.compDesc  = ''     # Component description
+tempBomEntry.compCount = 0      # Component count
+tempBomEntry.compNote  = ''     # Component note
+
+# Temporary BOM. Fields: 'Designator', 'Description', 'Count', 'Note', 'Base'
+# 'Base' field needed for second conversion pass
 tempbom = []
 
-# Reading original BOM csv
-with open('bom.csv', 'r', encoding='utf-8') as bomcsv:
+# Reading input BOM csv
+with open(inBomName, 'r', encoding='utf-8') as bomcsv:
         bomreader = csv.DictReader(bomcsv, delimiter=',', quotechar='"')
-        # Fields: Designator, Footprint, Manufacturer, ComponentName, Value, Tolerance, ValueII, ValueIII, Note
-        for entry in bomreader:
-                # Fill conversion structure if empty
-                if cCount == 0:
-                        cBase  = ''.join([i for i in entry['Designator'] if not i.isdigit()])
-                        cFirst = entry['Designator']
-                        cLast  = entry['Designator']
-                        cDesc  = entry['Footprint'] + \
-                                 commatize(entry['Manufacturer']) + commatize(entry['ComponentName']) + \
-                                 commatize(entry['Value']) + commatize(entry['Tolerance']) + \
-                                 commatize(entry['ValueII']) + commatize(entry['ValueIII'])
-                        cCount = 1
-                        cNote  = entry['Note']
+        
+        for rawEntry in bomreader:
+                # Begin fill tempBomEntry if empty
+                if tempBomEntry.compCount == 0:
+                        tempBomEntry.desBase   = base(rawEntry[gostDesColumn])
+                        tempBomEntry.desFirst  = rawEntry[gostDesColumn]
+                        tempBomEntry.desLast   = rawEntry[gostDesColumn]
+                        tempBomEntry.compDesc  = mkdesc(rawEntry, gostCompColumn)
+                        tempBomEntry.compCount = 1
+                        tempBomEntry.compNote  = rawEntry[gostNoteColumn]
                 else:
-                        # Fill comparsion structure
-                        curBase  = ''.join([i for i in entry['Designator'] if not i.isdigit()])
-                        curDesc  = entry['Footprint'] + \
-                                   commatize(entry['Manufacturer']) + commatize(entry['ComponentName']) + \
-                                   commatize(entry['Value']) + commatize(entry['Tolerance']) + \
-                                   commatize(entry['ValueII']) + commatize(entry['ValueIII'])
-                        curNote  = entry['Note']
+                        # Fill conversion structure
+                        convBomEntry.desBase   = base(rawEntry[gostDesColumn])
+                        convBomEntry.compDesc  = mkdesc(rawEntry, gostCompColumn)
+                        convBomEntry.compNote  = rawEntry[gostNoteColumn]
 
-                        # Update conversion structure if data similar
-                        if (curBase + curDesc + curNote) == (cBase + cDesc + cNote):
-                                cLast  = entry['Designator']
-                                cCount = cCount + 1
+                        # Update temp entry if data similar
+                        if (convBomEntry.desBase + convBomEntry.compDesc + convBomEntry.compNote) == \
+                           (tempBomEntry.desBase + tempBomEntry.compDesc + tempBomEntry.compNote):
+                                tempBomEntry.desLast   = rawEntry[gostDesColumn]
+                                tempBomEntry.compCount = tempBomEntry.compCount + 1
                         else:
-                                tempbom.append({'Designator': des(cFirst, cLast, cCount),
-                                                'Description': cDesc,
-                                                'Count': cCount,
-                                                'Note': cNote,
-                                                'Base': cBase})
-                                cBase  = ''.join([i for i in entry['Designator'] if not i.isdigit()])
-                                cFirst = entry['Designator']
-                                cLast  = entry['Designator']
-                                cDesc  = entry['Footprint'] + \
-                                         commatize(entry['Manufacturer']) + commatize(entry['ComponentName']) + \
-                                         commatize(entry['Value']) + commatize(entry['Tolerance']) + \
-                                         commatize(entry['ValueII']) + commatize(entry['ValueIII'])
-                                cCount = 1
-                                cNote  = entry['Note']
-                                
-        tempbom.append({'Designator': des(cFirst, cLast, cCount),
-                        'Description': cDesc,
-                        'Count': cCount,
-                        'Note': cNote,
-                        'Base': cBase})
+                                # Move tempBomEntry to tempbom
+                                tempbom.append({'Designator': mkdes(tempBomEntry.desFirst,
+                                                                    tempBomEntry.desLast,
+                                                                    tempBomEntry.compCount),
+                                                'Description': tempBomEntry.compDesc,
+                                                'Count': tempBomEntry.compCount,
+                                                'Note': tempBomEntry.compNote,
+                                                'Base': tempBomEntry.desBase})
 
-# Read component groups csv
+                                # Begin fill next tempBomEntry
+                                tempBomEntry.desBase   = base(rawEntry[gostDesColumn])
+                                tempBomEntry.desFirst  = rawEntry[gostDesColumn]
+                                tempBomEntry.desLast   = rawEntry[gostDesColumn]
+                                tempBomEntry.compDesc  = mkdesc(rawEntry, gostCompColumn)
+                                tempBomEntry.compCount = 1
+                                tempBomEntry.compNote  = rawEntry[gostNoteColumn]
+
+        # Move last tempBomEntry to tempbom
+        tempbom.append({'Designator': mkdes(tempBomEntry.desFirst,
+                                            tempBomEntry.desLast,
+                                            tempBomEntry.compCount),
+                        'Description': tempBomEntry.compDesc,
+                        'Count': tempBomEntry.compCount,
+                        'Note': tempBomEntry.compNote,
+                        'Base': tempBomEntry.desBase})
+
+#
+# Second conversion pass to output BOM
+#
+
+# Read BOM headers before conversion
+# cgroups fields: 'Base', 'Single', 'Multiple'
 cgroups = []
 
-with open('cgroups.csv', 'r', encoding='utf-8') as cgroupscsv:
-        cgroupsreader = csv.reader(cgroupscsv, delimiter=',', quotechar='"')
-        for entry in cgroupsreader:
-                cgroups.append({'Base': entry[0], 'Single': entry[1], 'Multi': entry[2]})
+with open('cgroups.csv', 'r', encoding='utf-8') as cgcsv:
+        cgreader = csv.DictReader(cgcsv, delimiter=',', quotechar='"')
+        for entry in cgreader:
+                cgroups.append(entry)
 
-# Generate out BOM
-outbom = []      # Output BOM
-lastgroup = []   # Last component group
-singletitle = '' # Last goup titles
-multititle = ''
+# Output BOM generation data
+
+outbom      = []    # Output BOM
+lastgroup   = []    # Last component group
+singletitle = ''    # Last group titles
+multititle  = ''
 
 
-def getsingle(base):
-        global cgroups
+# Second pass functions
+
+def getsingle(base, cgroups):
         for entry in cgroups:
                 if entry['Base'] == base:
                         return entry['Single']
         return "Неизвестный компонент"
 
-def getmulti(base):
-        global cgroups
+def getmulti(base, cgroups):
         for entry in cgroups:
                 if entry['Base'] == base:
-                        return entry['Multi']
+                        return entry['Multiple']
         return "Неизвестные компоненты"
 
-def outputgroup():
-        global lastgroup
-        global outbom
+def outputgroup(outbom, lastgroup):
         if len(lastgroup) == 1:
                 outbom.append({'Designator': '',
                                'Description': '',
@@ -141,6 +187,8 @@ def outputgroup():
                                        'Count': row['Count'],
                                        'Note': row['Note']})
 
+# Output BOM generation
+
 for entry in tempbom:
         # First iteration
         if multititle == '':
@@ -148,10 +196,10 @@ for entry in tempbom:
                                   'Description': entry['Description'],
                                   'Count': entry['Count'],
                                   'Note': entry['Note']})
-                singletitle = getsingle(entry['Base'])
-                multititle =  getmulti(entry['Base'])
+                singletitle = getsingle(entry['Base'], cgroups)
+                multititle =  getmulti(entry['Base'], cgroups)
         # Extend group
-        elif getmulti(entry['Base']) == multititle:
+        elif getmulti(entry['Base'], cgroups) == multititle:
                 lastgroup.append({'Designator': entry['Designator'],
                                   'Description': entry['Description'],
                                   'Count': entry['Count'],
@@ -159,28 +207,28 @@ for entry in tempbom:
         # Output group, make new group
         else:
                 # Output group
-                outputgroup()
-                
+                outputgroup(outbom, lastgroup)
+
                 # Flush and fill group
                 lastgroup = []
                 lastgroup.append({'Designator': entry['Designator'],
                                   'Description': entry['Description'],
                                   'Count': entry['Count'],
                                   'Note': entry['Note']})
-                singletitle = getsingle(entry['Base'])
-                multititle =  getmulti(entry['Base'])
+                singletitle = getsingle(entry['Base'], cgroups)
+                multititle =  getmulti(entry['Base'], cgroups)
 # Output group
-outputgroup()
+outputgroup(outbom, lastgroup)
 
-# Result print
+# Print result
 for entry in outbom:
-        print(entry['Designator'], '|',
-              entry['Description'], '|',
-              entry['Count'], '|',
+        print(entry['Designator'], '\t',
+              entry['Description'], '\t',
+              entry['Count'], '\t',
               entry['Note'])
 
-# Write gost-bom.csv
-with open('gost-bom.csv', 'w', encoding='utf-8', newline='') as gostbomcsv:
+# Write output BOM
+with open(outBomName, 'w', encoding='utf-8', newline='') as gostbomcsv:
     fieldnames = ['Designator', 'Description', 'Count', 'Note']
     writer = csv.DictWriter(gostbomcsv, fieldnames=fieldnames)
 
@@ -190,6 +238,5 @@ with open('gost-bom.csv', 'w', encoding='utf-8', newline='') as gostbomcsv:
                              'Description': entry['Description'],
                              'Count': entry['Count'],
                              'Note': entry['Note']})
-    
 
 
